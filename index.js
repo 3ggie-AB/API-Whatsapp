@@ -11,6 +11,7 @@ const client = new Client({
 client.on('ready', () => {
     console.log('Client is ready!');
 
+    // Kirim Pesan
     const number = "6285875477952";
     const message = "Hello, this is a test message from whatsapp-web.js!";
     const chatId = number + "@c.us";
@@ -22,6 +23,34 @@ client.on('ready', () => {
             console.log('Message sent successfully:', response);
         }).catch(err => {
             console.error('Failed to send message:', err);
+        });
+    });
+
+    // Ambil Data Grup
+    client.getChats().then(chats => {
+        // Iterasi melalui daftar chat
+        chats.forEach(chat => {
+            // Memeriksa apakah chat adalah grup
+            if (chat.isGroup) {
+                console.log(`Group Name: ${chat.name}`);
+                console.log(`Group ID: ${chat.id._serialized}`);
+            }
+        });
+    }).catch(err => {
+        console.error('Failed to get chats:', err);
+    });
+
+    // Chat ke Beberapa Pesan
+    const penerimas = [
+        "6285875477952",
+        "6289509718426",
+    ];
+    penerimas.forEach(penerima => {
+        const chatId = penerima + "@c.us"; // Format chat ID untuk nomor telepon
+        client.sendMessage(chatId, message).then(response => {
+            console.log(`Message sent to ${penerima}:`, response);
+        }).catch(err => {
+            console.error(`Failed to send message to ${penerima}:`, err);
         });
     });
 });
