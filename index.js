@@ -1,5 +1,4 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const schedule = require('node-schedule');
 const fs = require('fs');
@@ -61,7 +60,6 @@ client.on('message', message => {
 });
 
 client.on('qr', qr => {
-    qrcode.generate(qr, { small: true });
     QRCode.toFile('whatsapp-qr.png', qr, function (err) {
         if (err) throw err;
         console.log('QR code saved as whatsapp-qr.png');

@@ -11,10 +11,10 @@
   "author": "Egi",
   "license": "ISC",
   "dependencies": {
+    "express": "^4.19.2",
     "node-schedule": "^2.1.1",
     "nodemon": "^3.1.4",
     "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.25.0"
   }
 }
