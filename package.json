@@ -11,9 +11,11 @@
   "author": "Egi",
   "license": "ISC",
   "dependencies": {
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "node-schedule": "^2.1.1",
     "nodemon": "^3.1.4",
+    "puppeteer": "^23.2.1",
     "qrcode": "^1.5.4",
     "whatsapp-web.js": "^1.25.0"
   }
