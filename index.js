@@ -9,7 +9,6 @@ const express = require('express');
 const app = express();
 const port = 3000;
 
-
 let isLoggedIn = false;
 app.use(express.json());
 
@@ -20,20 +19,17 @@ const client = new Client({
 client.on('ready', () => {
     isLoggedIn = true;
     const chatId = client.info.wid._serialized;
-    client.sendMessage(chatId, "API Whatsapp Aktif !!!").then(response => {
-        console.log('API Whatsapp Aktif !!!');
-    }).catch(err => {
-        console.error('API Whatsapp Eror :', err);
-    });
+    client.sendMessage(chatId, "API Whatsapp Aktif !!!")
+        .then(() => console.log('API Whatsapp Aktif !!!'))
+        .catch(err => console.error('API Whatsapp Error:', err));
 });
-
 
 client.on('auth_failure', () => {
-    res.json({ status: '500', message: 'Error' });
     isLoggedIn = false;
+    console.log('Autentikasi Gagal');
 });
 
-app.get('/api/synchat/get-groups', authenticateToken, (req, res) => {
+app.post('/api/synchat/get-groups', authenticateToken, (req, res) => {
     if (isLoggedIn) {
         client.getChats().then(chats => {
             const groups = chats.filter(chat => chat.isGroup);
@@ -53,14 +49,40 @@ app.get('/api/synchat/get-groups', authenticateToken, (req, res) => {
     }
 });
 
+app.post('/api/synchat/get-contacts', authenticateToken, (req, res) => {
+    if (isLoggedIn) {
+        client.getContacts().then(contacts => {
+            const uniqueContacts = Array.from(new Map(contacts.map(contact => [contact.number, contact])).values());
+            const filteredContacts = uniqueContacts.filter(contact => {
+                const number = contact.number;
+                const validNumber = number && (number.startsWith('628') || number.startsWith('+628'));
+                const validName = contact.name && contact.name.trim() !== '';
+                const validPushname = contact.pushname && contact.pushname.trim() !== '';
+                return validNumber && !contact.isGroup && (validName || validPushname);
+            });
+            res.json({
+                status: '200',
+                message: 'Berhasil Mengambil Data Kontak',
+                contacts: filteredContacts.map(contact => ({
+                    name: contact.name || contact.pushname || 'Tanpa Nama',
+                    number: contact.number
+                }))
+            });
+        }).catch(err => {
+            console.error('Gagal mendapatkan daftar kontak:', err);
+            res.status(500).json({ status: '500', message: 'Gagal mendapatkan daftar kontak' });
+        });
+    } else {
+        res.status(401).json({ status: '401', message: 'Harap login terlebih dahulu' });
+    }
+});
+
 app.post('/api/synchat/grup', authenticateToken, (req, res) => {
     if (isLoggedIn) {
-        const grups = req.body.grups; // Mengambil array ID grup dari body request
-        const message = req.body.pesan; // Mengambil pesan dari body request
+        const grups = req.body.grups;
+        const message = req.body.pesan;
         const scheduleTime = req.body.jadwal ? new Date(req.body.jadwal) : new Date();
-        // Mengambil waktu penjadwalan dari body request
 
-        // Validasi input
         if (!Array.isArray(grups) || grups.length === 0 || !message) {
             return res.status(400).json({
                 status: '400',
@@ -68,30 +90,21 @@ app.post('/api/synchat/grup', authenticateToken, (req, res) => {
             });
         }
 
-        // Konversi waktu penjadwalan ke objek Date
         const scheduleDate = new Date(scheduleTime);
 
-        // Penjadwalan pengiriman pesan
         schedule.scheduleJob(scheduleDate, () => {
-            // Kirim pesan ke setiap ID grup pada waktu yang ditentukan
             const promises = grups.map(groupId => {
-                // Pastikan format ID grup sesuai, misalnya dengan @g.us untuk grup
-                const chatId = groupId;
-                return client.sendMessage(chatId, message);
+                return client.sendMessage(groupId, message);
             });
 
             Promise.all(promises)
-                .then(responses => {
-                    console.log('Pesan terkirim ke Semua Grup:');
-                })
-                .catch(err => {
-                    console.error('Gagal mengirim pesan:', err);
-                });
+                .then(() => console.log('Pesan terkirim ke Semua Grup'))
+                .catch(err => console.error('Gagal mengirim pesan ke grup',));
         });
 
         res.json({
             status: '200',
-            message: 'Pesan dikirim'
+            message: 'Pesan dijadwalkan'
         });
     } else {
         res.status(401).json({
@@ -101,13 +114,12 @@ app.post('/api/synchat/grup', authenticateToken, (req, res) => {
     }
 });
 
-app.post('/api/synchat/pesan', authenticateToken, (req, res) => {
+app.post('/api/synchat/pesan', authenticateToken, async (req, res) => {
     if (isLoggedIn) {
-        const numbers = req.body.nomor; // Mengambil array nomor telepon dari body request
-        const message = req.body.pesan; // Mengambil pesan dari body request
-        const scheduleTime = req.body.jadwal ? new Date(req.body.jadwal) : new Date(); // Mengambil waktu penjadwalan dari body request
+        const numbers = req.body.nomor;
+        const message = req.body.pesan;
+        const scheduleTime = req.body.jadwal ? new Date(req.body.jadwal) : null;
 
-        // Validasi input
         if (!Array.isArray(numbers) || numbers.length === 0 || !message) {
             return res.status(400).json({
                 status: '400',
@@ -115,31 +127,46 @@ app.post('/api/synchat/pesan', authenticateToken, (req, res) => {
             });
         }
 
-        // Konversi waktu penjadwalan ke objek Date
-        const scheduleDate = new Date(scheduleTime);
+        if (scheduleTime && scheduleTime > new Date()) {
+            schedule.scheduleJob(scheduleTime, async () => {
+                try {
+                    const promises = numbers.map(number => {
+                        const chatId = number + "@c.us";
+                        return client.sendMessage(chatId, message);
+                    });
 
-        // Penjadwalan pengiriman pesan
-        schedule.scheduleJob(scheduleDate, () => {
-            // Kirim pesan ke setiap nomor telepon pada waktu yang ditentukan
-            const promises = numbers.map(number => {
-                const chatId = number + "@c.us";
-                return client.sendMessage(chatId, message);
+                    await Promise.all(promises);
+                    console.log('Semua Pesan Terkirim');
+                } catch (err) {
+                    console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid');
+                }
             });
 
-            Promise.all(promises)
-                .then(responses => {
-                    console.log('Pesan terkirim ke semua nomor');
-                })
-                .catch(err => {
-                    console.error('Gagal mengirim pesan:', err);
+            res.json({
+                status: '200',
+                message: 'Pesan dijadwalkan'
+            });
+        } else {
+            try {
+                const promises = numbers.map(number => {
+                    const chatId = number + "@c.us";
+                    return client.sendMessage(chatId, message);
                 });
-        });
 
-        res.json({
-            status: '200',
-            message: 'Pesan dikirim'
-        });
-
+                await Promise.all(promises);
+                console.log('Semua Pesan Terkirim');
+                res.json({
+                    status: '200',
+                    message: 'Pesan Terkirim'
+                });
+            } catch (err) {
+                console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid');
+                res.status(500).json({
+                    status: '500',
+                    message: 'Gagal mengirim pesan'
+                });
+            }
+        }
     } else {
         res.status(401).json({
             status: '401',
@@ -148,7 +175,8 @@ app.post('/api/synchat/pesan', authenticateToken, (req, res) => {
     }
 });
 
-app.get('/api/synchat/qr', authenticateToken, (req, res) => {
+
+app.post('/api/synchat/qr', authenticateToken, (req, res) => {
     if (isLoggedIn) {
         res.json({ status: '201', message: 'Perangkat sudah terhubung' });
     } else {
@@ -162,43 +190,41 @@ app.get('/api/synchat/qr', authenticateToken, (req, res) => {
     }
 });
 
-app.get('/api/synchat/logout', authenticateToken, async (req, res) => {
+app.post('/api/synchat/logout', authenticateToken, async (req, res) => {
     try {
         await client.logout();
         isLoggedIn = false;
         res.json({ status: '200', message: 'Berhasil Logout' });
-        const chatId = client.info.wid._serialized;
-        client.sendMessage(chatId, "Akun Anda Berhasil Logout !!!").then(response => {
-            console.log('Akun Berhasil Logout !!!');
-        }).catch(err => {
-            console.error('API Whatsapp Eror :', err);
-        });
     } catch (err) {
-        res.json({ status: '500', message: 'Error, Tidak dapat Logout' });
+        res.status(500).json({ status: '500', message: 'Error, Tidak dapat Logout' });
     }
 });
 
-app.get('/api/synchat/status', authenticateToken, (req, res) => {
-    if (client.info && client.info.wid) {
-        res.json({ status: 'connected', message: 'Terhubung', clientInfo: client.info });
+app.post('/api/synchat/status', authenticateToken, (req, res) => {
+    if (isLoggedIn) {
+        if (client.info && client.info.wid) {
+            res.json({ status: 'connected', message: 'Terhubung', clientInfo: client.info });
+        } else {
+            res.status(500).json({ status: 'disconnected', message: 'Tidak Terhubung' });
+        }
     } else {
-        res.status(500).json({ status: 'disconnected', message: 'Tidak Terhubung' });
+        res.json({ status: 'disconnected', message: 'Tidak Terhubung', clientInfo: client.info });
     }
 });
 
 client.on('message', message => {
-    // Event listener untuk pesan masuk
     console.log('Menerima Pesan:', message.body);
 });
 
 client.on('qr', qr => {
-    QRCode.toFile('whatsapp-qr.png', qr, function (err) {
+    QRCode.toFile('whatsapp-qr.png', qr, err => {
         if (err) throw err;
         console.log('QR code saved as whatsapp-qr.png');
     });
 });
 
 client.initialize();
+
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
 });
