@@ -29,17 +29,21 @@ client.on('auth_failure', () => {
     console.log('Autentikasi Gagal');
 });
 
-app.post('/api/synchat/get-groups', authenticateToken, (req, res) => {
+app.post('/api/synchat/get-groups', authenticateToken, async (req, res) => {
     if (isLoggedIn) {
         client.getChats().then(chats => {
-            const groups = chats.filter(chat => chat.isGroup);
-            res.json({
-                status: '200',
-                groups: groups.map(group => ({
-                    id: group.id._serialized,
-                    name: group.name
-                }))
+        const groups = chats.filter(chat => chat.isGroup);
+
+        // Menggunakan forEach untuk membuat array dari grup
+        const groupData = [];
+        groups.forEach(group => {
+            groupData.push({
+                name: group.name,
+                id: group.id._serialized
             });
+        });
+
+        res.json(groupData);
         }).catch(err => {
             console.error('Gagal mendapatkan daftar grup:', err);
             res.status(500).json({ status: '500', message: 'Gagal mendapatkan daftar grup' });
@@ -49,7 +53,7 @@ app.post('/api/synchat/get-groups', authenticateToken, (req, res) => {
     }
 });
 
-app.post('/api/synchat/get-contacts', authenticateToken, (req, res) => {
+app.post('/api/synchat/get-contacts', authenticateToken, async (req, res) => {
     if (isLoggedIn) {
         client.getContacts().then(contacts => {
             const uniqueContacts = Array.from(new Map(contacts.map(contact => [contact.number, contact])).values());
