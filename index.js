@@ -33,29 +33,24 @@ client.on('auth_failure', () => {
 client.on('message_create', async message => {
     // Balasan untuk perintah !help
     if (message.body === '!help') {
-        await client.sendMessage(message.from, 'Selamat Datang Di BotEggie. Berikut Ini Adalah List Perintah Yang Tersedia :\n\n!help = Melihat Semua Perintah');
+        await client.sendMessage(message.from, 'Selamat Datang Di BotEggie. Berikut Ini Adalah List Perintah Yang Tersedia :\n\n!help = Melihat Semua Perintah\n!stiker = Gunakan dalam Foto untuk Membuat Stiker');
     }
     if (message.hasMedia && message.body === '!stiker') {
-        console.log('Caption : Menggunakan Fitur Stiker');
-            try {
-                const media = await message.downloadMedia();
-                console.log('Media Diterima:', media); 
-                const imageBuffer = Buffer.from(media.data, 'base64');
-                console.log('Image Buffer Length:', imageBuffer.length);
-                const webpBuffer = await sharp(imageBuffer)
-                    .resize(512, 512)
-                    .webp({ quality: 100 })
-                    .toBuffer();
-                console.log('WebP Buffer Length:', webpBuffer.length);
-                const stickerMedia = new MessageMedia('image/webp', webpBuffer.toString('base64'));
-                await client.sendMessage(message.from, stickerMedia, { sendMediaAsSticker: true });
-                await client.sendMessage(message.from, 'Stiker berhasil dikirim');
-                console.log('Stiker berhasil dikirim');
-            } catch (err) {
-                console.error('Gagal mengirim stiker:', err);
-            }
+        console.log(message.from, 'Menggunakan Fitur Stiker');
+        try {
+            const media = await message.downloadMedia();
+            const imageBuffer = Buffer.from(media.data, 'base64');
+            const webpBuffer = await sharp(imageBuffer)
+                .resize(512, 512)
+                .webp({ quality: 100 })
+                .toBuffer();
+            const stickerMedia = new MessageMedia('image/webp', webpBuffer.toString('base64'));
+            await client.sendMessage(message.from, stickerMedia, { sendMediaAsSticker: true });
+        } catch (err) {
+            console.error('Gagal mengirim stiker:', err);
         }
-    });
+    }
+});
 
 client.on('message', async message => {
     console.log('Menerima Pesan:', message.body);
