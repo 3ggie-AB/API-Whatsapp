@@ -1,8 +1,9 @@
 require('dotenv').config();
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const sharp = require('sharp');
 const QRCode = require('qrcode');
 const path = require('path');
-const authenticateToken = require('./auth'); 
+const authenticateToken = require('./auth');
 const schedule = require('node-schedule');
 const fs = require('fs');
 const express = require('express');
@@ -13,7 +14,12 @@ let isLoggedIn = false;
 app.use(express.json());
 
 const client = new Client({
-    authStrategy: new LocalAuth()
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        timeout: 60000
+    }
 });
 
 client.on('ready', () => {
@@ -24,26 +30,54 @@ client.on('ready', () => {
         .catch(err => console.error('API Whatsapp Error:', err));
 });
 
+client.on('disconnected', (reason) => {
+    console.log('WhatsApp disconnected:', reason);
+    client.initialize();
+});
+
+
 client.on('auth_failure', () => {
     isLoggedIn = false;
     console.log('Autentikasi Gagal');
 });
 
+client.on('message_create', async message => {
+    // Balasan untuk perintah !help
+    if (message.body === '!help') {
+        await client.sendMessage(message.from, 'Selamat Datang Di BotEggie. Berikut Ini Adalah List Perintah Yang Tersedia :\n\n!help = Melihat Semua Perintah\n!stiker = Gunakan dalam Foto untuk Membuat Stiker');
+    }
+    if (message.hasMedia && message.body === '!stiker') {
+        console.log(message.from, 'Menggunakan Fitur Stiker');
+        try {
+            const media = await message.downloadMedia();
+            const imageBuffer = Buffer.from(media.data, 'base64');
+            const webpBuffer = await sharp(imageBuffer)
+                .resize(512, 512)
+                .webp({ quality: 100 })
+                .toBuffer();
+            const stickerMedia = new MessageMedia('image/webp', webpBuffer.toString('base64'));
+            await client.sendMessage(message.from, stickerMedia, { sendMediaAsSticker: true });
+        } catch (err) {
+            console.error('Gagal mengirim stiker:', err);
+        }
+    }
+});
+
+client.on('message', async message => {
+    console.log('Menerima Pesan:', message.body);
+});
+
 app.post('/api/synchat/get-groups', authenticateToken, async (req, res) => {
     if (isLoggedIn) {
         client.getChats().then(chats => {
-        const groups = chats.filter(chat => chat.isGroup);
+            const groups = chats.filter(chat => chat.isGroup);
 
-        // Menggunakan forEach untuk membuat array dari grup
-        const groupData = [];
-        groups.forEach(group => {
-            groupData.push({
+            const groupData = groups.map(group => ({
                 name: group.name,
                 id: group.id._serialized
-            });
-        });
+            }));
 
-        res.json(groupData);
+            res.json(groupData);
         }).catch(err => {
             console.error('Gagal mendapatkan daftar grup:', err);
             res.status(500).json({ status: '500', message: 'Gagal mendapatkan daftar grup' });
@@ -81,35 +115,60 @@ app.post('/api/synchat/get-contacts', authenticateToken, async (req, res) => {
     }
 });
 
-app.post('/api/synchat/grup', authenticateToken, (req, res) => {
+app.post('/api/synchat/grup', authenticateToken, async (req, res) => {
     if (isLoggedIn) {
-        const grups = req.body.grups;
+        const numbers = req.body.grups;
         const message = req.body.pesan;
-        const scheduleTime = req.body.jadwal ? new Date(req.body.jadwal) : new Date();
+        const scheduleTime = req.body.jadwal ? new Date(req.body.jadwal) : null;
 
-        if (!Array.isArray(grups) || grups.length === 0 || !message) {
+        if (!Array.isArray(numbers) || numbers.length === 0 || !message) {
             return res.status(400).json({
                 status: '400',
-                message: 'Array ID grup dan pesan harus disediakan'
+                message: 'Array ID Grup dan pesan harus disediakan'
             });
         }
 
-        const scheduleDate = new Date(scheduleTime);
+        if (scheduleTime && scheduleTime > new Date()) {
+            schedule.scheduleJob(scheduleTime, async () => {
+                try {
+                    const promises = numbers.map(number => {
+                        const chatId = number;
+                        return client.sendMessage(chatId, message);
+                    });
 
-        schedule.scheduleJob(scheduleDate, () => {
-            const promises = grups.map(groupId => {
-                return client.sendMessage(groupId, message);
+                    await Promise.all(promises);
+                    console.log('Semua Pesan Terkirim');
+                } catch (err) {
+                    console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid', err);
+                }
             });
 
-            Promise.all(promises)
-                .then(() => console.log('Pesan terkirim ke Semua Grup'))
-                .catch(err => console.error('Gagal mengirim pesan ke grup',));
-        });
+            res.json({
+                status: '200',
+                message: 'Pesan dijadwalkan'
+            });
+        } else {
+            try {
+                const promises = numbers.map(number => {
+                    const chatId = number;
+                    return client.sendMessage(chatId, message);
+                });
 
-        res.json({
-            status: '200',
-            message: 'Pesan dijadwalkan'
-        });
+                await Promise.all(promises);
+                console.log('Semua Pesan Terkirim');
+                res.json({
+                    status: '200',
+                    message: 'Pesan Terkirim'
+                });
+            } catch (err) {
+                console.error('Gagal mengirim pesan, Mungkin ID Grup Yang Dimasukkan Tidak Valid', err);
+                res.status(500).json({
+                    status: '500',
+                    message: 'Gagal mengirim pesan',
+                    error: err
+                });
+            }
+        }
     } else {
         res.status(401).json({
             status: '401',
@@ -142,7 +201,7 @@ app.post('/api/synchat/pesan', authenticateToken, async (req, res) => {
                     await Promise.all(promises);
                     console.log('Semua Pesan Terkirim');
                 } catch (err) {
-                    console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid');
+                    console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid', err);
                 }
             });
 
@@ -164,10 +223,11 @@ app.post('/api/synchat/pesan', authenticateToken, async (req, res) => {
                     message: 'Pesan Terkirim'
                 });
             } catch (err) {
-                console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid');
+                console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid', err);
                 res.status(500).json({
                     status: '500',
-                    message: 'Gagal mengirim pesan'
+                    message: 'Gagal mengirim pesan',
+                    error: err
                 });
             }
         }
@@ -178,7 +238,6 @@ app.post('/api/synchat/pesan', authenticateToken, async (req, res) => {
         });
     }
 });
-
 
 app.post('/api/synchat/qr', authenticateToken, (req, res) => {
     if (isLoggedIn) {
@@ -204,6 +263,69 @@ app.post('/api/synchat/logout', authenticateToken, async (req, res) => {
     }
 });
 
+app.post('/api/synchat/broadcast', authenticateToken, async (req, res) => {
+    if (isLoggedIn) {
+        const messages = req.body.pesan; // Sekarang ini adalah array objek yang berisi nomor dan isi pesan
+        const scheduleTime = req.body.jadwal ? new Date(req.body.jadwal) : null;
+
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({
+                status: '400',
+                message: 'Array pesan harus disediakan'
+            });
+        }
+
+        if (scheduleTime && scheduleTime > new Date()) {
+            // Jika ada waktu penjadwalan
+            schedule.scheduleJob(scheduleTime, async () => {
+                try {
+                    const promises = messages.map(item => {
+                        const chatId = item.nomor + "@c.us";
+                        return client.sendMessage(chatId, item.isi);
+                    });
+
+                    await Promise.all(promises);
+                    console.log('Semua Pesan Terkirim');
+                } catch (err) {
+                    console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid', err);
+                }
+            });
+
+            res.json({
+                status: '200',
+                message: 'Pesan dijadwalkan'
+            });
+        } else {
+            try {
+                const promises = messages.map(item => {
+                    const chatId = item.nomor + "@c.us";
+                    return client.sendMessage(chatId, item.isi);
+                });
+
+                await Promise.all(promises);
+                console.log('Semua Pesan Terkirim');
+                res.json({
+                    status: '200',
+                    message: 'Pesan Terkirim'
+                });
+            } catch (err) {
+                console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid', err);
+                res.status(500).json({
+                    status: '500',
+                    message: 'Gagal mengirim pesan',
+                    error: err
+                });
+            }
+        }
+    } else {
+        res.status(401).json({
+            status: '401',
+            message: 'Harap login terlebih dahulu'
+        });
+    }
+});
+
+
 app.post('/api/synchat/status', authenticateToken, (req, res) => {
     if (isLoggedIn) {
         if (client.info && client.info.wid) {
@@ -214,10 +336,6 @@ app.post('/api/synchat/status', authenticateToken, (req, res) => {
     } else {
         res.json({ status: 'disconnected', message: 'Tidak Terhubung', clientInfo: client.info });
     }
-});
-
-client.on('message', message => {
-    console.log('Menerima Pesan:', message.body);
 });
 
 client.on('qr', qr => {
