@@ -14,7 +14,12 @@ let isLoggedIn = false;
 app.use(express.json());
 
 const client = new Client({
-    authStrategy: new LocalAuth()
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        timeout: 60000
+    }
 });
 
 client.on('ready', () => {
@@ -24,6 +29,12 @@ client.on('ready', () => {
         .then(() => console.log('API Whatsapp Aktif !!!'))
         .catch(err => console.error('API Whatsapp Error:', err));
 });
+
+client.on('disconnected', (reason) => {
+    console.log('WhatsApp disconnected:', reason);
+    client.initialize();
+});
+
 
 client.on('auth_failure', () => {
     isLoggedIn = false;
@@ -104,35 +115,60 @@ app.post('/api/synchat/get-contacts', authenticateToken, async (req, res) => {
     }
 });
 
-app.post('/api/synchat/grup', authenticateToken, (req, res) => {
+app.post('/api/synchat/grup', authenticateToken, async (req, res) => {
     if (isLoggedIn) {
-        const grups = req.body.grups;
+        const numbers = req.body.grups;
         const message = req.body.pesan;
-        const scheduleTime = req.body.jadwal ? new Date(req.body.jadwal) : new Date();
+        const scheduleTime = req.body.jadwal ? new Date(req.body.jadwal) : null;
 
-        if (!Array.isArray(grups) || grups.length === 0 || !message) {
+        if (!Array.isArray(numbers) || numbers.length === 0 || !message) {
             return res.status(400).json({
                 status: '400',
-                message: 'Array ID grup dan pesan harus disediakan'
+                message: 'Array ID Grup dan pesan harus disediakan'
             });
         }
 
-        const scheduleDate = new Date(scheduleTime);
+        if (scheduleTime && scheduleTime > new Date()) {
+            schedule.scheduleJob(scheduleTime, async () => {
+                try {
+                    const promises = numbers.map(number => {
+                        const chatId = number;
+                        return client.sendMessage(chatId, message);
+                    });
 
-        schedule.scheduleJob(scheduleDate, () => {
-            const promises = grups.map(groupId => {
-                return client.sendMessage(groupId, message);
+                    await Promise.all(promises);
+                    console.log('Semua Pesan Terkirim');
+                } catch (err) {
+                    console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid', err);
+                }
             });
 
-            Promise.all(promises)
-                .then(() => console.log('Pesan terkirim ke Semua Grup'))
-                .catch(err => console.error('Gagal mengirim pesan ke grup', err));
-        });
+            res.json({
+                status: '200',
+                message: 'Pesan dijadwalkan'
+            });
+        } else {
+            try {
+                const promises = numbers.map(number => {
+                    const chatId = number;
+                    return client.sendMessage(chatId, message);
+                });
 
-        res.json({
-            status: '200',
-            message: 'Pesan dijadwalkan'
-        });
+                await Promise.all(promises);
+                console.log('Semua Pesan Terkirim');
+                res.json({
+                    status: '200',
+                    message: 'Pesan Terkirim'
+                });
+            } catch (err) {
+                console.error('Gagal mengirim pesan, Mungkin ID Grup Yang Dimasukkan Tidak Valid', err);
+                res.status(500).json({
+                    status: '500',
+                    message: 'Gagal mengirim pesan',
+                    error: err
+                });
+            }
+        }
     } else {
         res.status(401).json({
             status: '401',
@@ -226,6 +262,69 @@ app.post('/api/synchat/logout', authenticateToken, async (req, res) => {
         res.status(500).json({ status: '500', message: 'Error, Tidak dapat Logout' });
     }
 });
+
+app.post('/api/synchat/broadcast', authenticateToken, async (req, res) => {
+    if (isLoggedIn) {
+        const messages = req.body.pesan; // Sekarang ini adalah array objek yang berisi nomor dan isi pesan
+        const scheduleTime = req.body.jadwal ? new Date(req.body.jadwal) : null;
+
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({
+                status: '400',
+                message: 'Array pesan harus disediakan'
+            });
+        }
+
+        if (scheduleTime && scheduleTime > new Date()) {
+            // Jika ada waktu penjadwalan
+            schedule.scheduleJob(scheduleTime, async () => {
+                try {
+                    const promises = messages.map(item => {
+                        const chatId = item.nomor + "@c.us";
+                        return client.sendMessage(chatId, item.isi);
+                    });
+
+                    await Promise.all(promises);
+                    console.log('Semua Pesan Terkirim');
+                } catch (err) {
+                    console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid', err);
+                }
+            });
+
+            res.json({
+                status: '200',
+                message: 'Pesan dijadwalkan'
+            });
+        } else {
+            try {
+                const promises = messages.map(item => {
+                    const chatId = item.nomor + "@c.us";
+                    return client.sendMessage(chatId, item.isi);
+                });
+
+                await Promise.all(promises);
+                console.log('Semua Pesan Terkirim');
+                res.json({
+                    status: '200',
+                    message: 'Pesan Terkirim'
+                });
+            } catch (err) {
+                console.error('Gagal mengirim pesan, Mungkin Nomor Yang Dimasukkan Tidak Valid', err);
+                res.status(500).json({
+                    status: '500',
+                    message: 'Gagal mengirim pesan',
+                    error: err
+                });
+            }
+        }
+    } else {
+        res.status(401).json({
+            status: '401',
+            message: 'Harap login terlebih dahulu'
+        });
+    }
+});
+
 
 app.post('/api/synchat/status', authenticateToken, (req, res) => {
     if (isLoggedIn) {
